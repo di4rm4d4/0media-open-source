@@ -4,6 +4,10 @@ Build your own browser client on top of browser-side HTTP and TLS, an opaque Web
 
 This repository extracts the transport machinery from 0media into a standalone project. The example client is a hand-written HTML form and a small JavaScript file. It makes a real HTTPS request through your own relay and displays the response as text. There is no UI framework, feed, platform branding, or prebuilt Instagram, X, or Facebook client. You supply the platform integration and interface.
 
+## How 0media uses this
+
+0media uses this architecture to help keep web clients accessible despite dystopian app bans. Clients can route connections through relays in countries chosen for service availability and user safety, with the upstream service seeing the relay's outgoing IP address. TLS remains between the browser and the upstream service, so the relay carries encrypted traffic without decrypting requests or responses. Relay placement is an operator decision; this repository gives others the transport and backend to build their own clients and access routes.
+
 ## What is included
 
 | Component | What it does |

@@ -1,0 +1,15 @@
+services:
+  relay:
+    build: ./relay
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      RELAY_ALLOWED_ORIGINS: http://127.0.0.1:4173,http://localhost:4173
+      RELAY_ALLOWED_HTTP_HOSTS: 127.0.0.1,localhost
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    tmpfs:
+      - /tmp:size=16m,mode=1777

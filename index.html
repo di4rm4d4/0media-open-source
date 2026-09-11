@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>0media transport example</title>
+</head>
+<body>
+  <h1>0media transport example</h1>
+  <p>A plain HTML starting point. HTTP and TLS run in your browser; your relay forwards the encrypted bytes.</p>
+  <form id="request-form">
+    <p><label>Relay <input id="relay" type="url" value="ws://127.0.0.1:8080/ws/" size="42" required></label></p>
+    <p><label>URL <input id="url" type="url" value="https://example.com/" size="42" required></label></p>
+    <p><label>Method <select id="method"><option>GET</option><option>HEAD</option><option>POST</option></select></label></p>
+    <p><label>Headers (one name: value per line)<br><textarea id="headers" rows="3" cols="45">Accept: text/html</textarea></label></p>
+    <p><label>Body (POST only)<br><textarea id="body" rows="3" cols="45"></textarea></label></p>
+    <p><label><input id="cookies" type="checkbox"> Keep cookies in memory for this session</label></p>
+    <button id="send" type="submit">Send request</button>
+    <button id="cancel" type="button" disabled>Cancel</button>
+    <button id="disconnect" type="button">Close session</button>
+  </form>
+  <p id="status" role="status">Ready. No request is sent until you press Send.</p>
+  <pre id="response" style="white-space: pre-wrap; overflow-wrap: anywhere;"></pre>
+  <p>The default policy allows only example.com. Edit both destination policies to use your own service. Redirects are displayed, not automatically followed.</p>
+  <p>This form is not a platform login. Customize example.js to decode responses and build the client you want.</p>
+  <script type="module" src="/example.js"></script>
+</body>
+</html>

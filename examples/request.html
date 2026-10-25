@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Bounded requests · 0media transport</title>
+</head>
+<body>
+  <h1>Bounded text and JSON requests</h1>
+  <p>One deadline covers startup, response headers, and body consumption. Each request releases its HTTP resources when it ends.</p>
+  <form id="request-form">
+    <p><label>Relay <input id="relay" type="url" value="ws://127.0.0.1:8080/ws/" size="42" required></label></p>
+    <p><label>URL <input id="url" type="url" value="https://example.com/" size="42" required></label></p>
+    <p><label>Response <select id="format"><option value="text">Text</option><option value="json">JSON</option></select></label></p>
+    <button id="send" type="submit">Send request</button>
+    <button id="cancel" type="button" disabled>Cancel</button>
+    <button id="disconnect" type="button">Close session</button>
+  </form>
+  <p id="status" role="status">Ready. No request is sent until you press Send.</p>
+  <pre id="response" style="white-space: pre-wrap; overflow-wrap: anywhere;"></pre>
+  <p>Requests have a 30-second deadline and a 256 KiB response limit. Cookies are disabled. The default destination policy allows only example.com, which returns HTML; JSON mode needs your own approved API.</p>
+  <p><a href="/">Raw request inspector</a></p>
+  <script type="module" src="./request.js"></script>
+</body>
+</html>

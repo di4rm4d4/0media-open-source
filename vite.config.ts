@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   plugins: [{
@@ -10,6 +11,15 @@ export default defineConfig({
       }
     },
   }],
-  build: { target: "es2022", sourcemap: false },
+  build: {
+    target: "es2022",
+    sourcemap: false,
+    rolldownOptions: {
+      input: {
+        inspector: fileURLToPath(new URL("./index.html", import.meta.url)),
+        request: fileURLToPath(new URL("./examples/request.html", import.meta.url)),
+      },
+    },
+  },
   test: { environment: "jsdom", include: ["tests/**/*.test.ts"], restoreMocks: true },
 });

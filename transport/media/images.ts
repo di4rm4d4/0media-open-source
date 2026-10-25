@@ -9,7 +9,7 @@ const TIMEOUT_MS = 20_000;
 type PendingImage = { controller: AbortController; users: number; promise: Promise<string | undefined> };
 
 /** Coalesced, owner-cancellable image work. Failed results never poison refresh.
- * Successful URLs still live until client close; viewport leasing is separate. */
+ * Successful URLs live until explicit source release or client close. */
 export class ImageLoader {
   private readonly cached = new Map<string, string>();
   private readonly urls = new Set<string>();
@@ -71,7 +71,7 @@ export class ImageLoader {
 
   private async download(source: string, controller: AbortController): Promise<string | undefined> {
     const { signal } = controller;
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let release: (() => void) | undefined;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     const cancel = () => { void reader?.cancel().catch(() => undefined); };
@@ -79,6 +79,8 @@ export class ImageLoader {
       assertAllowedTarget(new URL(source));
       release = await this.slot(signal);
       signal.throwIfAborted();
+      // Local capacity waiting does not consume the network deadline.
+      timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
       const pending = this.fetch(source, { credentials: "omit", redirect: "error", signal,
         headers: { accept: "image/avif,image/webp,image/*,*/*;q=0.7" } });
       const response = await new Promise<Response>((resolve, reject) => {
@@ -122,6 +124,21 @@ export class ImageLoader {
       controller.abort();
       clearTimeout(timer);
       release?.();
+    }
+  }
+
+  /** Remove every DOM reference to this source's blob before releasing it. */
+  release(source: string): void {
+    const pending = this.pending.get(source);
+    if (pending) {
+      pending.controller.abort();
+      this.pending.delete(source);
+    }
+    const url = this.cached.get(source);
+    if (url) {
+      this.cached.delete(source);
+      this.urls.delete(url);
+      URL.revokeObjectURL(url);
     }
   }
 

@@ -1,11 +1,12 @@
 import type { FetchLike } from "./types";
 import { assertAllowedTarget, normalizeRelayUrl } from "./policy";
+import { waitForAbort } from "./abort";
 
 type LibcurlSession = import("libcurl.js/bundled").LibcurlSession;
 type PinnedStreamResponse = (
   this: LibcurlSession,
   url: string,
-  headersCallback: unknown,
+  headersCallback: (stream: ReadableStream<Uint8Array>) => void,
   endCallback: unknown,
   signal?: AbortSignal | null,
 ) => unknown;
@@ -67,7 +68,13 @@ function installLibcurlAbortGuard(session: LibcurlSession, isClosed: () => boole
   const guarded: PinnedStreamResponse = function (url, headersCallback, endCallback, signal) {
     if (isClosed()) throw new Error("This browser TLS session is closed.");
     signal?.throwIfAborted();
-    return original.call(this, url, headersCallback, endCallback, signal);
+    // Abort clears request_async's handle before deferred native removal.
+    // A final data callback can arrive in between; it must not read response
+    // info from that cleared handle. Keep the original completion callback.
+    const receiveHeaders = (stream: ReadableStream<Uint8Array>) => {
+      if (!signal?.aborted && !isClosed()) headersCallback(stream);
+    };
+    return original.call(this, url, receiveHeaders, endCallback, signal);
   };
   try {
     Object.defineProperty(managedSession, "stream_response", { value: guarded, configurable: true, writable: true });
@@ -154,7 +161,7 @@ export class BrowserTlsTransport implements BrowserTransport {
     const url = new URL(request.url);
     assertAllowedTarget(url);
     request.signal.throwIfAborted();
-    await this.initialize();
+    await waitForAbort(this.initialize(), request.signal);
     request.signal.throwIfAborted();
     const session = this.session;
     if (this.closed || !session) throw new Error("This browser TLS session is closed.");
@@ -164,18 +171,18 @@ export class BrowserTlsTransport implements BrowserTransport {
     const headers = browserTlsHeaders(request, init?.headers);
     const body = request.method === "GET" || request.method === "HEAD"
       ? undefined
-      : await request.arrayBuffer();
+      : await waitForAbort(request.arrayBuffer(), request.signal);
     request.signal.throwIfAborted();
     if (this.closed || this.session !== session) throw new Error("This browser TLS session is closed.");
 
-    return session.fetch(url, {
+    return waitForAbort(session.fetch(url, {
       method: request.method,
       headers,
       body,
       redirect: init?.redirect ?? (request.redirect === "error" ? "error" : "manual"),
       signal: request.signal,
       credentials: request.credentials === "include" ? "include" : "omit",
-    });
+    }), request.signal, late => { void late.body?.cancel().catch(() => undefined); });
   };
 
   exportCookieJar(): string {

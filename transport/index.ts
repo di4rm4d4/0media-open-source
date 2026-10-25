@@ -1,7 +1,12 @@
 export { BrowserTlsTransport } from "./browser-tls";
 export type { BrowserTlsTransportOptions, BrowserTransport } from "./browser-tls";
-export { assertAllowedTarget, normalizeRelayUrl } from "./policy";
+export { assertAllowedTarget, normalizeRelayUrl, TransportTargetError } from "./policy";
 export { readResponseBytes } from "./response";
+export { requestBytes, requestText, requestJson } from "./request";
+export type { HttpRequestOptions } from "./request";
+export { retryAfterMs } from "./retry-after";
+export { readVideoRange, RangeUnsupportedError } from "./media/ranges";
+export type { VideoMetadata } from "./media/ranges";
 export { ImageLoader } from "./media/images";
 export { VideoLoader } from "./media/video";
 export { updateApplicationWorker } from "./media/worker-lifecycle";

@@ -163,6 +163,50 @@ describe("browser-owned TLS transport boundary", () => {
     expect(session.closed).toBe(1);
   });
 
+  it("lets one caller stop waiting for WASM while another keeps shared initialization", async () => {
+    const loading = deferred();
+    mockedCurl.load.mockReturnValue(loading.promise);
+    const session = new FakeCurlSession();
+    mockedCurl.createSession.mockReturnValue(session);
+    const transport = new BrowserTlsTransport({ relayUrl: "ws://127.0.0.1:8080/ws/" });
+    const owner = new AbortController();
+    const cancelled = transport.fetch("https://example.com/", { signal: owner.signal }).catch(error => error);
+    const active = transport.fetch("https://example.com/");
+    await vi.waitFor(() => expect(mockedCurl.load).toHaveBeenCalledOnce());
+    owner.abort();
+    expect(await cancelled).toMatchObject({ name: "AbortError" });
+    expect(session.fetchCalls).toHaveLength(0);
+    loading.resolve();
+    await active;
+    expect(mockedCurl.createSession).toHaveBeenCalledOnce();
+    expect(session.fetchCalls).toHaveLength(1);
+    transport.close();
+  });
+
+  it.each(["abort", "close"])("ignores late response headers after %s while preserving native completion", async action => {
+    let headers!: (stream: ReadableStream<Uint8Array>) => void;
+    let end!: (error: number) => void;
+    const session = new FakeCurlSession();
+    session.stream_response = (_url, receiveHeaders, finish) => {
+      headers = receiveHeaders as typeof headers;
+      end = finish as typeof end;
+      return 1;
+    };
+    mockedCurl.createSession.mockReturnValue(session);
+    const transport = new BrowserTlsTransport({ relayUrl: "ws://127.0.0.1:8080/ws/" });
+    await transport.initialize();
+    const owner = new AbortController();
+    const receive = vi.fn();
+    const complete = vi.fn();
+    session.stream_response("https://example.com/", receive, complete, owner.signal);
+    if (action === "abort") owner.abort(); else transport.close();
+    headers(new ReadableStream());
+    end(0);
+    expect(receive).not.toHaveBeenCalled();
+    expect(complete).toHaveBeenCalledExactlyOnceWith(0);
+    transport.close();
+  });
+
   it.each(["abort", "close"])("rechecks %s after browser request body preparation", async action => {
     const prepared = deferred<ArrayBuffer>();
     const body = vi.spyOn(Request.prototype, "arrayBuffer").mockReturnValueOnce(prepared.promise);
@@ -207,6 +251,24 @@ describe("browser-owned TLS transport boundary", () => {
     expect(onAbort).toHaveBeenCalledTimes(action === "abort" ? 1 : 0); // No replayed abort event.
     transport.close();
     expect(session.closed).toBe(1);
+  });
+
+  it("cancels promptly during library options preparation and never publishes its late result", async () => {
+    const options = deferred();
+    const session = new FakeCurlSession();
+    session.optionsGate = options.promise;
+    mockedCurl.createSession.mockReturnValue(session);
+    const transport = new BrowserTlsTransport({ relayUrl: "ws://127.0.0.1:8080/ws/" });
+    const owner = new AbortController();
+    const pending = transport.fetch("https://example.com/", { signal: owner.signal }).catch(error => error);
+    await session.optionsStarted.promise;
+    owner.abort();
+    expect(await pending).toMatchObject({ name: "AbortError" });
+    expect(session.requests).toHaveLength(0);
+    options.resolve();
+    await Promise.resolve(); await Promise.resolve();
+    expect(session.requests).toHaveLength(0);
+    transport.close();
   });
 
   it("guards only the owned session and preserves normal callbacks, receiver and request options", async () => {

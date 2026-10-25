@@ -49,3 +49,55 @@ it("times out an uncooperative transport and never publishes its late image", as
   expect(URL.createObjectURL).not.toHaveBeenCalled();
   loader.close();
 });
+
+it("gives queued images a full network deadline after admission", async () => {
+  vi.useFakeTimers();
+  const finishes: Array<(response: Response) => void> = [];
+  const fetch = vi.fn(() => new Promise<Response>(resolve => finishes.push(resolve)));
+  const loader = new ImageLoader(fetch);
+  const pending = Array.from({ length: 5 }, (_, i) => loader.load(source(i)));
+  await vi.advanceTimersByTimeAsync(19_000);
+  expect(fetch).toHaveBeenCalledTimes(4);
+  finishes[0](response());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetch).toHaveBeenCalledTimes(5);
+  await vi.advanceTimersByTimeAsync(2_000);
+  finishes[4](response());
+  expect(await pending[4]).toBe("blob:offline");
+  await Promise.all(pending);
+  loader.close();
+});
+
+it("releases an image by source and downloads it again on an explicit later load", async () => {
+  let sequence = 0;
+  vi.mocked(URL.createObjectURL).mockImplementation(() => `blob:image-${++sequence}`);
+  const fetch = vi.fn(async () => response());
+  const loader = new ImageLoader(fetch);
+  expect(await loader.load(source(1))).toBe("blob:image-1");
+  loader.release(source(1));
+  loader.release(source(1));
+  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:image-1");
+  expect(await loader.load(source(1))).toBe("blob:image-2");
+  expect(fetch).toHaveBeenCalledTimes(2);
+  loader.close();
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
+});
+
+it("discards a released source's late response without disturbing its replacement", async () => {
+  let finish!: (response: Response) => void;
+  const fetch = vi.fn()
+    .mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+    .mockImplementationOnce(async () => response());
+  const loader = new ImageLoader(fetch);
+  const pending = loader.load(source(1));
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  loader.release(source(1));
+  expect(await pending).toBeUndefined();
+  expect(await loader.load(source(1))).toBe("blob:offline");
+  const cancel = vi.fn();
+  finish(new Response(new ReadableStream({ cancel })));
+  await Promise.resolve(); await Promise.resolve();
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(URL.createObjectURL).toHaveBeenCalledOnce();
+  loader.close();
+});

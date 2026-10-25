@@ -9,19 +9,19 @@ Keep network transport in `BrowserTlsTransport`. Put a service's URLs, request f
 For example, an adapter for **an API you control** could look like this. The hostname and endpoint are illustrative; they are not endpoints for any named social platform:
 
 ```js
-import { readResponseBytes } from "./transport/index.ts";
+import { requestJson } from "./transport/index.ts";
 
 export function createExampleAdapter(fetch) {
   return {
     async listItems(signal) {
-      const response = await fetch("https://api.example.org/items", {
+      const payload = await requestJson(fetch, "https://api.example.org/items", {
         headers: { accept: "application/json" },
-        credentials: "omit", redirect: "error", signal,
+        credentials: "omit", signal,
+        timeoutMs: 15_000, maxBytes: 512 * 1024,
       });
-      const bytes = await readResponseBytes(response, 512 * 1024, signal);
-      if (!response.ok) throw new Error(`Request failed (${response.status}).`);
-      const payload = JSON.parse(new TextDecoder().decode(bytes));
-      if (!Array.isArray(payload.items)) throw new Error("Unexpected items response.");
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
+        throw new Error("Unexpected items response.");
+      }
       return payload.items.slice(0, 100).map(item => {
         if (typeof item.id !== "string" || typeof item.text !== "string") {
           throw new Error("Unexpected item format.");
@@ -33,7 +33,9 @@ export function createExampleAdapter(fetch) {
 }
 ```
 
-Pass `transport.fetch` into that adapter. The caller supplies an AbortController and a deadline and aborts in `finally`, just as the example does. Render text with `textContent`. Do not insert a remote HTML response directly into your application's DOM; untrusted markup would run inside the page that owns plaintext and cookies.
+Pass `transport.fetch` into that adapter. The caller supplies a view/account cancellation signal; the helper owns the per-request deadline and HTTP cleanup. Render text with `textContent`. Do not insert a remote HTML response directly into your application's DOM; untrusted markup would run inside the page that owns plaintext and cookies.
+
+For a complete, typechecked pagination example, see [`examples/pagination.ts`](../examples/pagination.ts). It validates each page, keeps cursors on the original endpoint, caps page count, stops repeated cursors, and requests a continuation only when the consumer asks for it. Its service contract is illustrative and tested with synthetic data. Adapt that contract to your own documented API.
 
 ## Add your service to both policies
 

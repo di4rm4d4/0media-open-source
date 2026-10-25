@@ -20,12 +20,14 @@ The frontend command runs Vitest, TypeScript checking, and the production build.
 
 | Area | Examples of covered behavior |
 | --- | --- |
-| Browser TLS ownership | Lazy initialization, explicit headers, aborts around awaited preparation, closed sessions, safe polling cleanup, cookie/session resource ownership. |
+| Browser TLS ownership | Lazy initialization, independent cancellation during shared startup, explicit headers, allocation guards, late-header suppression, closed sessions, and safe polling cleanup. |
 | Browser policy | Local-only plain WebSocket, approved HTTPS destinations, forbidden ports/credentials/fragments, relay URL normalization. |
-| Response consumption | Actual-byte bounds, cancellation, and reader cleanup. |
-| Images | Coalescing, caller cancellation, deadlines, bounded bodies, cache lifetime, object URL cleanup. |
+| Request helpers | Bounded bytes/text/JSON, content-type and UTF-8 checks, HTTP errors, retry metadata, full-request deadlines, external aborts, and late-response cleanup. |
+| Response consumption | Actual-byte bounds, cancellation, reader cleanup, and stalled source cancellation hooks. |
+| Images | Coalescing, caller cancellation, deadlines after admission, bounded bodies, explicit release, and late-response cleanup. |
 | Video | Download/lease admission, supported types, byte limits, explicit rendition retry, aborting late/stalled responses. |
-| Progressive bridge | Range math and validation, ownership, invalidation, worker capability/interception, protocol errors, and lifecycle cleanup. |
+| Progressive bridge | Range validation, one ETag-pinned tail repair, shared repair deadlines, ownership, invalidation, worker capability/interception, and protocol errors. |
+| Pagination example | Response validation, original-endpoint cursor handling, finite page count, no prefetch, continuation errors, and cancellation. |
 | Python relay | Origin/Host validation, binary forwarding, limits, capacity, DNS address filtering, pinned socket connections, cancellation, resource closure, and log redaction. |
 | Edge relay | Destination policy, origin and binary protocol checks, and TypeScript checking of the implementation. |
 
@@ -37,13 +39,15 @@ Start the relay and HTML example using the README instructions. Press Send on `h
 
 Test the built version too: stop the development server, run `npm run build`, then `npm run preview` on port 4173. That exercises the generated WASM chunk rather than only Vite's development module loading.
 
+Open `/examples/request.html` to check the bounded helpers too. Text mode with `https://example.com/` should return literal HTML. JSON mode on that HTML URL should show a content-type error and remain usable for the next request. Check cancellation, repeated requests, and Close session; both example pages belong to the production build.
+
 For a media integration, use public sample media that you control, add its exact host to both policies, and exercise seek, pause, resume, navigation, worker replacement, aborted ranges, and lease release in a real browser. The default form has no media player, and `example.com` is not a media fixture host. Workers runtime deployment and broad browser/device coverage are separate validation tasks.
 
 ## Dependency maintenance
 
 The browser dependency is pinned to libcurl.js 0.7.1, the version whose lifecycle boundaries this extraction retains. That pin is a compatibility choice, not a claim that it is the latest or free of known vulnerabilities. Before a dependency upgrade, inspect the session implementation, WASM/TLS build and trust bundle, redirects, cookie semantics, cancellation behavior, and licensing materials.
 
-The wrapper currently guards `stream_response` and clears `event_loop`. Keep those regression tests while determining whether a newer dependency provides the guarantees itself. If the API no longer supports a safe guard, fail explicitly instead of issuing an unguarded request.
+The wrapper currently guards `stream_response`, suppresses headers after abort/close, and clears `event_loop`. Keep those regression tests while determining whether a newer dependency provides the guarantees itself. If the API no longer supports a safe guard, fail explicitly instead of issuing an unguarded request. The main application's custom WASM/session changes are not a drop-in replacement for the public package; review any transfer against the exact dependency used here.
 
 The JavaScript lockfile fixes package versions and integrity values. Python runtime requirements pin direct packages, with transitive resolution left to pip. A release intended for wider use should inventory that resolved environment, review dependency advisories and base-image updates, and preserve build inputs. None of the passing tests represents a full dependency or cryptographic audit.
 

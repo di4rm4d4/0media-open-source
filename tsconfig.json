@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["vite/client", "node", "vitest/globals"]
   },
-  "include": ["transport", "relay-edge", "tests", "vite.config.ts"]
+  "include": ["transport", "relay-edge", "examples", "tests", "vite.config.ts"]
 }

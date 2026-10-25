@@ -2,7 +2,35 @@
 
 The main entry point is [`transport/index.ts`](../transport/index.ts). The example imports this TypeScript module through Vite; a plain browser cannot load the source `.ts` file without that build step. Your UI itself can remain ordinary HTML and JavaScript.
 
-## A bounded request
+## Request helpers
+
+`requestBytes`, `requestText`, and `requestJson` accept a `FetchLike`, a URL or Request, and request options. Inject `transport.fetch` to keep the request inside browser-owned TLS:
+
+```js
+import { requestText } from "./transport/index.ts";
+
+const text = await requestText(transport.fetch, "https://example.com/", {
+  signal: viewController.signal,
+  timeoutMs: 15_000,
+  maxBytes: 256 * 1024,
+});
+```
+
+The caller owns `transport` and `viewController` in this snippet. The transport can remain open across several requests. Each helper creates and cleans up its own HTTP owner; completing one request never aborts the caller's signal or closes the transport.
+
+| Helper | Result |
+| --- | --- |
+| `requestBytes(fetch, input, options?)` | `Uint8Array` containing at most `maxBytes` actual bytes. |
+| `requestText(fetch, input, options?)` | UTF-8 text decoded from the bounded body. |
+| `requestJson(fetch, input, options?)` | An `unknown` JSON value. Requires `application/json` or an `application/*+json` type and valid UTF-8 JSON; validate its shape in the service adapter. |
+
+`HttpRequestOptions` extends `RequestInit` with `timeoutMs` (default 30,000) and `maxBytes` (default 262,144). Both must be positive safe integers; the timeout must also fit the browser timer's 2,147,483,647 ms limit. The deadline includes WASM startup, headers, and body consumption. Invalid limits are rejected before dispatch. The byte limit covers decompressed bytes returned by the transport, independently of Content-Length.
+
+Helpers default to `redirect: "error"` and reject every non-2xx response with `ProtocolError`. Its `status` and optional `retryAfterMs` support explicit retry UI without exposing a remote error body or private URL in the message. `retryAfterMs(headers)` is also exported for raw-response consumers. There is no helper retry loop, including for writes. libcurl's own connection-reuse behavior remains part of the pinned dependency; these helpers do not provide exactly-once delivery.
+
+A caller abort preserves its reason. A helper deadline rejects with a `TimeoutError` DOMException. The helper aborts its owned HTTP request in `finally`, cancels unread or late response bodies, clears its timer, and removes its external abort listener. A transport that ignores cancellation can continue its own work; a helper cannot force arbitrary injected code to stop. Streaming responses and non-2xx body inspection belong at the raw `transport.fetch` layer below.
+
+## A raw bounded request
 
 ```js
 import { BrowserTlsTransport, readResponseBytes } from "./transport/index.ts";
@@ -74,12 +102,12 @@ This example never writes a jar to localStorage, sessionStorage, IndexedDB, a se
 
 ## Cancellation and compatibility guards
 
-Cancellation is checked before initialization, after initialization, after buffering the body, and immediately before the library allocates a request. The last check matters because libcurl.js 0.7.1 awaits option preparation before installing its own abort listener. An abort during that gap could otherwise miss the listener and allocate a request after its owner has disappeared.
+Cancellation is checked before initialization, after initialization, after buffering the body, and immediately before the library allocates a request. A caller can stop waiting for shared WASM initialization or body preparation immediately; another caller can continue using that initialization. The final allocation check matters because libcurl.js 0.7.1 awaits option preparation before installing its own abort listener. An abort during that gap could otherwise miss the listener and allocate a request after its owner has disappeared.
 
-The wrapper installs a guard on the owned session's `stream_response` method, rather than replacing a shared global prototype. If that boundary is missing or cannot be guarded, initialization fails and closes the new session.
+The wrapper installs a guard on the owned session's `stream_response` method, rather than replacing a shared global prototype. It also suppresses a late headers callback after cancellation or closure: the dependency can clear its HTTP handle before deferred native removal, and reading response information in that gap is unsafe. The completion callback remains intact for native cleanup. If the allocation boundary is missing or cannot be guarded, initialization fails and closes the new session.
 
 Closing a libcurl.js 0.7.1 session while a response is active can leave its polling interval alive. `closeLibcurlSessionSafely()` clears the pinned dependency's `event_loop` interval before calling its close method. These two accommodations depend on the pinned version's internals. A dependency upgrade must recheck them against actual library source and run the lifecycle tests; do not simply remove them because the public API still compiles.
 
 The session's connection settings are `set_connections(12, 8, 4)`, matching the dependency's maximum-connections, cache-size, and per-host arguments. These limits concern the session's connection pool; they do not bound all JavaScript request objects or all media caches in an application.
 
-`readResponseBytes()` counts actual returned bytes, cancels its reader on abort or completion, and releases the stream lock. With the pinned library, aborting the owning request is also needed to promptly release the underlying HTTP handle. Keep that abort in a `finally` block even if the body was fully read.
+`readResponseBytes()` counts actual returned bytes, cancels its reader on abort or completion, and releases the stream lock without waiting for a source's asynchronous cancellation hook. With the pinned library, aborting the owning request is also needed to promptly release the underlying HTTP handle. Keep that abort in a `finally` block even if the body was fully read, or use a request helper that owns this cleanup.

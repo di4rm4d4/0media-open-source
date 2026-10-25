@@ -24,9 +24,11 @@ images.close();
 
 Requests for the same source share one in-progress download. Each caller owns a claim; cancelling one caller does not abort another caller's download. Once no callers remain, the shared controller is aborted. Failed work is removed so a later request can try again.
 
-The loader permits four concurrent downloads, at most 128 pending source entries, a 20-second deadline including queue time, and 15 MiB per image. It checks both declared and actual byte counts and requires a successful `image/*` response. Most network or content failures return `undefined`; an already-aborted caller or admission rejection can reject the promise.
+The loader permits four concurrent downloads, at most 128 pending source entries, a 20-second network deadline starting after admission, and 15 MiB per image. Waiting for a local slot does not consume that network deadline; the caller can still cancel queued work. It checks both declared and actual byte counts and requires a successful `image/*` response. Most network or content failures return `undefined`; an already-aborted caller or admission rejection can reject the promise.
 
-Successful blobs are cached until `images.close()`. There is no aggregate successful-cache byte cap or per-image release method. A long-running scrolling client must add eviction/viewport ownership or scope loaders to short-lived views. Closing the loader revokes all its blobs and aborts pending work; it should happen after removing their DOM references.
+Successful blobs are cached until explicitly released or the loader closes. Call `images.release(approvedImageUrl)` after removing **all** DOM references to that source's blob. Release cancels pending work for that source, evicts its cache entry, and revokes its object URL. It is idempotent; a later `load` starts a fresh download. This is source-level ownership, not reference counting between views.
+
+There is no automatic aggregate cache cap. A long-running client should release images as their owning views end or scope loaders to short-lived views. Closing the loader revokes all remaining blobs and aborts pending work; remove their DOM references first.
 
 ## Video leases
 
@@ -103,6 +105,12 @@ Root-relative worker and virtual paths are intentional. Serve the application at
 The initial metadata request is `Range: bytes=0-1`. Later pulls request chunks of at most 1 MiB. `readVideoRange()` requires status 206, a precise `Content-Range`, MP4/WebM content type, identity content encoding, and exactly the expected number of actual response bytes. It rejects mismatched Content-Length, truncated/oversized chunks, malformed ranges, and representations over 512 MiB.
 
 Every subsequent chunk must retain the original size, MIME type, ETag, and Last-Modified value. A strong ETag or Last-Modified is sent through `If-Range` when available. If a service supplies neither, comparing missing validators cannot prove the content is unchanged; an immutable source URL is preferable. Multi-range requests are unsupported. Single bounded, open-ended, and suffix ranges are handled.
+
+A clean EOF after a nonempty prefix can trigger **one** request for the missing tail, provided the response supplies a syntactically strong ETag. The loader keeps the received prefix and pins the same representation with `If-Range`. Both requests share one allocation of at most 1 MiB and the original 20-second deadline. An empty prefix, missing/weak ETag, thrown stream error, malformed response, authentication failure, rate limit, changed representation, or second truncation fails without another repair. The public `readVideoRange` function exposes this bounded behavior to other media integrations.
+
+`RangeUnsupportedError` is also exported. It identifies an initial successful MP4/WebM response that ignored Range, allowing a caller to choose its own bounded fallback. It is never used to turn an authentication error or changed representation into a fallback request.
+
+The repair uses the strong-validator boundary described in [HTTP If-Range semantics](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.5).
 
 There are two active upstream range requests across this page's bridge, up to four open streams per lease, a 20-second deadline per upstream range, and a 45-second page-side idle port timer. The worker waits up to four seconds for initial headers and 25 seconds for a pulled chunk, and sends keepalives every 15 seconds while a playback stream is alive. Its stream uses a zero high-water mark and requests a new chunk on demand.
 

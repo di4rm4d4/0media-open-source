@@ -1,4 +1,6 @@
-/** Bound the displayed/decompressed response, not just Content-Length. */
+import { waitForAbort } from "./abort";
+
+/** Bound the consumed/decompressed response, not just Content-Length. */
 export async function readResponseBytes(response: Response, maxBytes = 256 * 1024, signal?: AbortSignal): Promise<Uint8Array> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error("Invalid response limit.");
   signal?.throwIfAborted();
@@ -11,11 +13,12 @@ export async function readResponseBytes(response: Response, maxBytes = 256 * 102
   try {
     while (true) {
       signal?.throwIfAborted();
-      const { done, value } = await reader.read();
+      const pending = reader.read();
+      const { done, value } = await (signal ? waitForAbort(pending, signal) : pending);
       signal?.throwIfAborted();
       if (done) break;
       size += value.byteLength;
-      if (size > maxBytes) throw new Error(`Response exceeds the ${maxBytes}-byte display limit.`);
+      if (size > maxBytes) throw new Error(`Response exceeds the ${maxBytes}-byte limit.`);
       chunks.push(value);
     }
     const result = new Uint8Array(size);
@@ -24,7 +27,9 @@ export async function readResponseBytes(response: Response, maxBytes = 256 * 102
     return result;
   } finally {
     signal?.removeEventListener("abort", abort);
-    await reader.cancel().catch(() => undefined);
+    // A source's asynchronous cancel hook may never settle. Cleanup must not
+    // keep a cancelled request alive after its owner's deadline.
+    void reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }
